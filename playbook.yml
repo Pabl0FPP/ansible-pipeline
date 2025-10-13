@@ -25,6 +25,15 @@
         group: "{{ ansible_user }}"
         recurse: yes
 
+    - name: Copiar aplicación web del Teclado
+      copy:
+        src: "../Teclado/"
+        dest: "/var/www/html/"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+        directory_mode: '0755'
+
 - name: Instalación de Docker y Docker Compose en Ubuntu
   hosts: jenkins
   become: true
@@ -95,22 +104,56 @@
         src: docker-compose.yml
         dest: /home/{{ ansible_user }}/docker-compose.yml
 
-    # Ejecutar un archivo docker-compose.yml
-    - name: Ejecutar docker-compose.yml
-      command: docker-compose up -d
+    # Reiniciar servicio Docker para aplicar cambios de grupo
+    - name: Reiniciar Docker para aplicar cambios de grupo
+      systemd:
+        name: docker
+        state: restarted
+
+    # Verificar que Docker esté funcionando
+    - name: Verificar que Docker daemon esté activo
+      command: sudo docker info
+      retries: 3
+      delay: 10
+      register: docker_info
+      until: docker_info.rc == 0
+
+    # Ejecutar docker-compose con sudo para evitar problemas de permisos
+    - name: Ejecutar docker-compose.yml con sudo
+      shell: |
+        cd /home/{{ ansible_user }}
+        sudo docker-compose up -d
       args:
         chdir: /home/{{ ansible_user }}/
-      become_user: "{{ ansible_user }}"
-      become_method: su
 
-    - name: Instalar plugins jenkins
-      command: docker exec -it jenkins jenkins-plugin-cli --plugin-file /plugins.txt
-      become_user: "{{ ansible_user }}"
-      become_method: su
-      notify: restart jenkins
+    # Verificar que los contenedores estén creados
+    - name: Verificar estado de contenedores Docker
+      shell: sudo docker ps --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Ports{{ '}}' }}"
+      register: containers_status
 
-  handlers:
-    - name: restart jenkins
-      command: sudo docker restart jenkins
-      become_user: "{{ ansible_user }}"
-      become_method: su
+    - name: Mostrar estado de contenedores
+      debug:
+        msg: "{{ containers_status.stdout_lines }}"
+
+    # Esperar de manera más robusta a que los servicios estén listos
+    - name: Esperar a que Jenkins responda (puede tardar varios minutos)
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:80"
+        method: GET
+        status_code: [200, 403, 503]  # Jenkins puede devolver 403 o 503 mientras se inicializa
+      register: jenkins_response
+      until: jenkins_response.status in [200, 403]
+      retries: 20
+      delay: 30
+      ignore_errors: yes
+
+    - name: Esperar a que SonarQube responda
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:9000"
+        method: GET
+        status_code: [200, 503]  # SonarQube puede devolver 503 mientras se inicializa
+      register: sonar_response
+      until: sonar_response.status == 200
+      retries: 15
+      delay: 30
+      ignore_errors: yes
