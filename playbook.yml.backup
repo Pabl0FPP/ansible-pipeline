@@ -1,0 +1,231 @@
+---
+- name: Instalar y configurar Nginx
+  hosts: nginx
+  become: true
+  tasks:
+    - name: Actualizar cache de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Iniciar servicio Nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Cambiar propietario de /var/www/html
+      file:
+        path: /var/www/html
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        recurse: yes
+
+    - name: Copiar aplicación web del Teclado
+      copy:
+        src: "../Teclado/"
+        dest: "/var/www/html/"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+        directory_mode: '0755'
+
+- name: Instalación y configuración de Jenkins, SonarQube y Docker
+  hosts: jenkins
+  become: true
+  vars:
+    jenkins_admin_password: "admin123"  # TODO: Move to Ansible Vault
+    jenkins_host: "{{ ansible_default_ipv4.address }}"
+  
+  tasks:
+    # Ensure Jenkins home directory exists and has correct permissions
+    - name: Ensure Jenkins home directory exists and is persistent
+      file:
+        path: /var/jenkins_home
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+
+    # Actualizar el cache de paquetes
+    - name: Actualizar el cache de paquetes
+      apt:
+        update_cache: yes
+
+    # Instalar dependencias para Docker
+    - name: Instalar dependencias para Docker
+      apt:
+        name: 
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg-agent
+          - software-properties-common
+          - python3-pip
+        state: present
+
+    # Agregar la clave GPG oficial de Docker
+    - name: Agregar la clave GPG oficial de Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    # Agregar el repositorio de Docker al sources.list.d
+    - name: Agregar el repositorio de Docker al sources.list.d
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable
+        state: present
+
+    # Actualizar el cache de paquetes de nuevo (para que encuentre el paquete de Docker)
+    - name: Actualizar el cache de paquetes de nuevo (para que encuentre el paquete de Docker)
+      apt:
+        update_cache: yes
+
+    # Instalar Docker
+    - name: Instalar Docker
+      apt:
+        name: docker-ce
+        state: present
+
+    # Añadir el usuario actual al grupo de Docker
+    - name: Añadir el usuario actual al grupo de Docker
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # Instalar Docker Compose v2 (plugin)
+    - name: Instalar Docker Compose v2 plugin
+      apt:
+        name: docker-compose-plugin
+        state: present
+    
+    # Instalar pip dependencies for Docker module
+    - name: Instalar docker Python module
+      pip:
+        name:
+          - docker
+          - docker-compose
+        state: present
+    
+    - name: Establecer vm.max_map_count en el kernel
+      sysctl:
+        name: vm.max_map_count
+        value: "262144"
+        state: present
+        reload: yes
+    
+    # Copy Jenkins build context (Dockerfile, plugins.txt, casc.yaml)
+    - name: Create Jenkins build directory
+      file:
+        path: /home/{{ ansible_user }}/jenkins
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+    
+    - name: Copy Jenkins Dockerfile
+      copy:
+        src: jenkins/Dockerfile
+        dest: /home/{{ ansible_user }}/jenkins/Dockerfile
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+    
+    - name: Copy Jenkins plugins.txt
+      copy:
+        src: jenkins/plugins.txt
+        dest: /home/{{ ansible_user }}/jenkins/plugins.txt
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+    
+    - name: Copy Jenkins casc.yaml
+      copy:
+        src: jenkins/casc.yaml
+        dest: /home/{{ ansible_user }}/jenkins/casc.yaml
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+    
+    # Create .env file with secrets
+    - name: Create .env file for Docker Compose
+      copy:
+        content: |
+          JENKINS_ADMIN_PASSWORD={{ jenkins_admin_password }}
+          SONAR_TOKEN=placeholder_will_be_updated
+          JENKINS_HOST={{ jenkins_host }}
+        dest: /home/{{ ansible_user }}/.env
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+    
+    - name: Copiar docker-compose.yml
+      copy:
+        src: docker-compose.yml
+        dest: /home/{{ ansible_user }}/docker-compose.yml
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0644'
+
+    # Reiniciar servicio Docker para aplicar cambios de grupo
+    - name: Reiniciar Docker para aplicar cambios de grupo
+      systemd:
+        name: docker
+        state: restarted
+
+    # Verificar que Docker esté funcionando
+    - name: Verificar que Docker daemon esté activo
+      command: docker info
+      retries: 3
+      delay: 10
+      register: docker_info
+      until: docker_info.rc == 0
+
+    # Build and start all services with Docker Compose
+    - name: Build Jenkins custom image and start all services
+      community.docker.docker_compose:
+        project_src: /home/{{ ansible_user }}
+        build: yes
+        pull: yes
+        state: present
+      environment:
+        JENKINS_ADMIN_PASSWORD: "{{ jenkins_admin_password }}"
+        SONAR_TOKEN: "placeholder"
+        JENKINS_HOST: "{{ jenkins_host }}"
+
+    # Verificar que los contenedores estén creados
+    - name: Verificar estado de contenedores Docker
+      shell: sudo docker ps --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.Ports{{ '}}' }}"
+      register: containers_status
+
+    - name: Mostrar estado de contenedores
+      debug:
+        msg: "{{ containers_status.stdout_lines }}"
+
+    # Esperar de manera más robusta a que los servicios estén listos
+    - name: Esperar a que Jenkins responda (puede tardar varios minutos)
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:80"
+        method: GET
+        status_code: [200, 403, 503]  # Jenkins puede devolver 403 o 503 mientras se inicializa
+      register: jenkins_response
+      until: jenkins_response.status in [200, 403]
+      retries: 20
+      delay: 30
+      ignore_errors: yes
+
+    - name: Esperar a que SonarQube responda
+      uri:
+        url: "http://{{ ansible_default_ipv4.address }}:9000"
+        method: GET
+        status_code: [200, 503]  # SonarQube puede devolver 503 mientras se inicializa
+      register: sonar_response
+      until: sonar_response.status == 200
+      retries: 15
+      delay: 30
+      ignore_errors: yes

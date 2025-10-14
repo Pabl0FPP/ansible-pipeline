@@ -1,0 +1,33 @@
+jenkins:
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "admin123"
+  authorizationStrategy:
+    globalMatrix:
+      permissions:
+        - "Overall/Administer:admin"
+        - "Overall/Read:authenticated"
+  
+  # Disable setup wizard
+  installStateMachine:
+    initialSetupCompleted: true
+
+# SonarQube server configuration
+unclassified:
+  sonarGlobalConfiguration:
+    installations:
+      - name: "SonarQube"
+        serverUrl: "http://SONARQUBE_IP:9000"
+        credentialsId: "sonar-token"
+
+# Suggested plugins to install
+jenkins:
+  plugins:
+    required:
+      - sonar
+      - git
+      - workflow-aggregator
+      - credentials-binding

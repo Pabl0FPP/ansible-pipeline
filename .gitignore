@@ -1,0 +1,14 @@
+# Ansible
+*.retry
+.env
+group_vars/all/vault.yml
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/OS noise
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -1,0 +1,57 @@
+jenkins:
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    globalMatrix:
+      permissions:
+        - "Overall/Administer:admin"
+        - "Overall/Read:authenticated"
+  nodes:
+    - permanent:
+        name: "master"
+        remoteFS: "/var/jenkins_home"
+        numExecutors: 2
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: SONARQUBE_URL
+            value: "${SONARQUBE_URL}"
+          - key: SONAR_TOKEN
+            value: "${SONAR_TOKEN}"
+          - key: PATH
+            value: "/usr/local/bin:/usr/local/lib/nodejs/node-v18.20.2-linux-x64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+unclassified:
+  location:
+    url: "${JENKINS_URL}"
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - string:
+              scope: GLOBAL
+              id: "SONAR_TOKEN"
+              secret: "${SONAR_TOKEN}"
+              description: "Token for SonarQube analysis"
+jobs:
+  - script: |
+      pipelineJob('pipeline-teclado') {
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('https://github.com/Pabl0FPP/Teclado')
+                }
+                branches('main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+          }
+        }
+        quietPeriod(0)
+        disabled(false)
+      }

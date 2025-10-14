@@ -1,0 +1,10 @@
+configuration-as-code:latest
+workflow-aggregator:latest
+pipeline-model-definition:latest
+git:latest
+git-client:latest
+credentials:latest
+credentials-binding:latest
+job-dsl:latest
+matrix-auth:latest
+

@@ -1,30 +1,38 @@
-version: "3"
 services:
   jenkins:
-    image: madmilodz/jenkinsci:v3
+    build:
+      context: ./jenkins
+      dockerfile: Dockerfile
+    image: jenkins-custom:latest
     container_name: jenkins
     environment:
-      - DOCKER_HOST=tcp://localhost:2375
-      - JENKINS_UC=http://updates.jenkins.io
-      - JENKINS_UC_EXPERIMENTAL=http://updates.jenkins.io/experimental
-      - JENKINS_INCREMENTALS_REPO_MIRROR=http://repo.jenkins-ci.org/incrementals
-      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
-    user: root
+      - JENKINS_ADMIN_PASSWORD=${JENKINS_ADMIN_PASSWORD:-admin123}
+      - SONARQUBE_URL=http://sonarqube:9000
+      - SONAR_TOKEN=${SONAR_TOKEN:-placeholder}
+      - JENKINS_URL=http://${JENKINS_HOST:-localhost}
+      - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Xms256m -Xmx1024m
     ports:
       - "80:8080"
-      - "8443:8443"
       - "50000:50000"
-    expose:
-      - "8080"
     volumes:
       - jenkins-data:/var/jenkins_home
-      - jenkins-home:/home
+    depends_on:
+      - sonarqube
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:8080/login || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
 
   sonarqube:
-    image: sonarqube:8.2-community
+    image: sonarqube:9.9.4-community
     container_name: sonarqube
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
       - "9000:9000"
     environment:
@@ -35,22 +43,41 @@ services:
       - sonarqube_conf:/opt/sonarqube/conf
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_extensions:/opt/sonarqube/extensions
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9000/api/system/status || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
 
   db:
-    image: postgres
+    image: postgres:13
+    container_name: postgres
     environment:
       - POSTGRES_USER=sonar
       - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=sonar
     volumes:
       - postgresql:/var/lib/postgresql
-      # This needs explicit mapping due to https://github.com/docker-library/postgres/blob/4e48e3228a30763913ece952c611e5e9b95c8759/Dockerfile.template#L52
       - postgresql_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  jenkins-data: {}
-  jenkins-home: {}
-  sonarqube_conf: {}
-  sonarqube_data: {}
-  sonarqube_extensions: {}
-  postgresql: {}
-  postgresql_data: {}
+  jenkins-data:
+    name: jenkins-data
+  sonarqube_conf:
+    name: sonarqube_conf
+  sonarqube_data:
+    name: sonarqube_data
+  sonarqube_extensions:
+    name: sonarqube_extensions
+  postgresql:
+    name: postgresql
+  postgresql_data:
+    name: postgresql_data
