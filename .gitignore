@@ -12,3 +12,7 @@ __pycache__/
 .idea/
 .DS_Store
 *.swp
+
+# Large/binary artifacts
+*.war
+jenkins.war
